@@ -113,10 +113,10 @@
           loadingDiv.textContent = data.detail || "Failed to read PDF.";
           return;
         }
-        conversationHistory += "\n" + data.text;
-        loadingDiv.textContent = `✅ Loaded ${data.pages} page(s) from "${data.filename}". Ask me to summarize it or click "Generate Quiz from Chat" above!`;
+        conversationHistory = data.text;
+        loadingDiv.textContent = `✅ Loaded "${data.filename}" (${data.pages} pages). Ask me to summarize it or click "Generate Quiz from Chat" above!`;
       } catch (err) {
-        loadingDiv.textContent = "Error uploading PDF. Make sure you are viewing the live Render website link.";
+        loadingDiv.textContent = "Error uploading PDF: " + err.message;
       }
       fileInput.value = "";
     }
@@ -127,7 +127,6 @@
       if (!text) return;
 
       appendMessage(text, true);
-      conversationHistory += "\n" + text;
       input.value = "";
 
       const loadingDiv = appendMessage("Thinking...", false);
@@ -139,10 +138,14 @@
           body: JSON.stringify({ message: text, context: conversationHistory })
         });
         const data = await res.json();
-        loadingDiv.textContent = data.reply || "Sorry, something went wrong.";
-        conversationHistory += "\n" + loadingDiv.textContent;
+        if (!res.ok) {
+          loadingDiv.textContent = data.detail || "Server error.";
+          return;
+        }
+        loadingDiv.textContent = data.reply;
+        conversationHistory += "\n" + text + "\n" + data.reply;
       } catch (err) {
-        loadingDiv.textContent = "Error connecting to server. Make sure you open the live Render URL, not the local file.";
+        loadingDiv.textContent = "Connection error: " + err.message;
       }
     }
 
@@ -161,6 +164,10 @@
           body: JSON.stringify({ message: "Generate quiz", context: conversationHistory })
         });
         const data = await res.json();
+        if (!res.ok) {
+          loadingDiv.textContent = data.detail || "Quiz error.";
+          return;
+        }
         loadingDiv.remove();
 
         data.questions.forEach((q, idx) => {
@@ -186,7 +193,7 @@
         });
         document.getElementById("chat-box").scrollTop = document.getElementById("chat-box").scrollHeight;
       } catch (err) {
-        loadingDiv.textContent = "Could not generate quiz. Please try again.";
+        loadingDiv.textContent = "Could not generate quiz: " + err.message;
       }
     }
   </script>
