@@ -67,7 +67,7 @@ def chat_endpoint(req: ChatMessage):
             full_prompt = f"Study Notes Context:\n{req.context[:6000]}\n\nStudent Question: {req.message}"
 
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-3.0-flash",
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -88,7 +88,7 @@ def quiz_endpoint(req: ChatMessage):
         prompt = f"Generate 3 multiple-choice questions based on this topic/notes. Provide 4 options each and the exact matching correct_answer.\n\nContent:\n{topic_text[:6000]}"
 
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-3.0-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
