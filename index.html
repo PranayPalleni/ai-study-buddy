@@ -8,15 +8,21 @@
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
     body { background: #f0f4f9; display: flex; flex-direction: column; height: 100vh; color: #1f1f1f; }
     header {
-      background: #ffffff; padding: 16px 24px; border-bottom: 1px solid #e0e0e0;
-      display: flex; justify-content: space-between; align-items: center;
+      background: #ffffff; padding: 14px 24px; border-bottom: 1px solid #e0e0e0;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
     }
     header h1 { font-size: 1.2rem; color: #1a73e8; display: flex; align-items: center; gap: 8px; }
+    .header-actions { display: flex; gap: 8px; }
     .quiz-btn {
-      background: #e8f0fe; color: #1a73e8; border: none; padding: 8px 16px;
-      border-radius: 20px; font-weight: 600; cursor: pointer; transition: 0.2s;
+      background: #e8f0fe; color: #1a73e8; border: none; padding: 8px 14px;
+      border-radius: 20px; font-weight: 600; cursor: pointer; transition: 0.2s; font-size: 0.88rem;
     }
     .quiz-btn:hover { background: #d2e3fc; }
+    .next-btn {
+      background: #e6f4ea; color: #137333; border: none; padding: 8px 14px;
+      border-radius: 20px; font-weight: 600; cursor: pointer; display: none; font-size: 0.88rem;
+    }
+    .next-btn:hover { background: #ceead6; }
     #chat-box {
       flex: 1; overflow-y: auto; padding: 24px; max-width: 820px; width: 100%;
       margin: 0 auto; display: flex; flex-direction: column; gap: 16px;
@@ -63,24 +69,29 @@
 
   <header>
     <h1>✨ AI Study Buddy</h1>
-    <button class="quiz-btn" onclick="generateQuiz()">📝 Generate Quiz from Chat</button>
+    <div class="header-actions">
+      <button class="next-btn" id="next-pages-btn" onclick="loadNextPages()">📖 Next 15 Pages</button>
+      <button class="quiz-btn" onclick="generateQuiz()">📝 Generate Quiz from Chat</button>
+    </div>
   </header>
 
   <div id="chat-box">
-    <div class="msg ai-msg">Hello! Click <b>📎 Upload PDF</b> to load your lecture notes, or type any question below. When you're ready, click <b>Generate Quiz from Chat</b> above!</div>
+    <div class="msg ai-msg">Hello! Click <b>📎 Upload PDF</b> to load your lecture notes (handles large 85+ page PDFs section by section!), or type any question below.</div>
   </div>
 
   <div class="input-area">
     <div class="input-wrapper">
       <label class="upload-label" for="pdf-upload">📎 Upload PDF</label>
-      <input type="file" id="pdf-upload" accept=".pdf" style="display:none" onchange="uploadPDF()" />
-      <input type="text" id="user-input" placeholder="Ask a question or paste notes..." onkeypress="if(event.key==='Enter') sendMessage()" />
+      <input type="file" id="pdf-upload" accept=".pdf" style="display:none" onchange="handleNewPDF()" />
+      <input type="text" id="user-input" placeholder="Ask a question or type 'summarize'..." onkeypress="if(event.key==='Enter') sendMessage()" />
       <button class="send-btn" onclick="sendMessage()">Send</button>
     </div>
   </div>
 
   <script>
     let conversationHistory = "";
+    let currentPdfFile = null;
+    let currentEndPage = 0;
 
     function appendMessage(text, isUser) {
       const chatBox = document.getElementById("chat-box");
@@ -92,33 +103,68 @@
       return div;
     }
 
-    async function uploadPDF() {
-      const fileInput = document.getElementById("pdf-upload");
-      const file = fileInput.files[0];
-      if (!file) return;
+    async function fetchWithTimeout(url, options, timeoutMs = 25000) {
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        clearTimeout(id);
+        return response;
+      } catch (err) {
+        clearTimeout(id);
+        throw err;
+      }
+    }
 
-      appendMessage(`📄 Uploaded: ${file.name}`, true);
-      const loadingDiv = appendMessage("Reading your PDF...", false);
+    function handleNewPDF() {
+      const fileInput = document.getElementById("pdf-upload");
+      if (!fileInput.files || !fileInput.files) return;
+      currentPdfFile = fileInput.files;
+      currentEndPage = 0;
+      fileInput.value = "";
+      loadNextPages();
+    }
+
+    async function loadNextPages() {
+      if (!currentPdfFile) return;
+
+      const startPage = currentEndPage + 1;
+      const endPage = currentEndPage + 15;
+
+      appendMessage(`📄 Loading "${currentPdfFile.name}" (Pages ${startPage}–${endPage})`, true);
+      const loadingDiv = appendMessage("Extracting section text...", false);
 
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", currentPdfFile);
+      formData.append("start_page", startPage);
+      formData.append("end_page", endPage);
 
       try {
-        const res = await fetch("/api/upload-pdf", {
+        const res = await fetchWithTimeout("/api/upload-pdf", {
           method: "POST",
           body: formData
-        });
+        }, 30000);
         const data = await res.json();
         if (!res.ok) {
           loadingDiv.textContent = data.detail || "Failed to read PDF.";
           return;
         }
+
         conversationHistory = data.text;
-        loadingDiv.textContent = `✅ Loaded "${data.filename}" (${data.pages} pages). Ask me to summarize it or click "Generate Quiz from Chat" above!`;
+        currentEndPage = data.loaded_to;
+
+        const nextBtn = document.getElementById("next-pages-btn");
+        if (data.has_more) {
+          nextBtn.style.display = "inline-block";
+          nextBtn.textContent = `📖 Load Pages ${currentEndPage + 1}–${Math.min(data.total_pages, currentEndPage + 15)}`;
+        } else {
+          nextBtn.style.display = "none";
+        }
+
+        loadingDiv.textContent = `✅ Loaded Pages ${data.loaded_from}–${data.loaded_to} of ${data.total_pages}. Type "summarize" or click "Generate Quiz from Chat"!`;
       } catch (err) {
-        loadingDiv.textContent = "Error uploading PDF: " + err.message;
+        loadingDiv.textContent = "Upload timed out. Please try clicking Load Next Pages again.";
       }
-      fileInput.value = "";
     }
 
     async function sendMessage() {
@@ -132,11 +178,11 @@
       const loadingDiv = appendMessage("Thinking...", false);
 
       try {
-        const res = await fetch("/api/chat", {
+        const res = await fetchWithTimeout("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: text, context: conversationHistory })
-        });
+        }, 25000);
         const data = await res.json();
         if (!res.ok) {
           loadingDiv.textContent = data.detail || "Server error.";
@@ -145,7 +191,7 @@
         loadingDiv.textContent = data.reply;
         conversationHistory += "\n" + text + "\n" + data.reply;
       } catch (err) {
-        loadingDiv.textContent = "Connection error: " + err.message;
+        loadingDiv.textContent = "Server took too long. Please click Send once more!";
       }
     }
 
@@ -158,11 +204,11 @@
       const loadingDiv = appendMessage("Creating your practice quiz...", false);
 
       try {
-        const res = await fetch("/api/quiz", {
+        const res = await fetchWithTimeout("/api/quiz", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: "Generate quiz", context: conversationHistory })
-        });
+        }, 25000);
         const data = await res.json();
         if (!res.ok) {
           loadingDiv.textContent = data.detail || "Quiz error.";
@@ -193,7 +239,7 @@
         });
         document.getElementById("chat-box").scrollTop = document.getElementById("chat-box").scrollHeight;
       } catch (err) {
-        loadingDiv.textContent = "Could not generate quiz: " + err.message;
+        loadingDiv.textContent = "Quiz request timed out. Please click Generate Quiz again!";
       }
     }
   </script>
