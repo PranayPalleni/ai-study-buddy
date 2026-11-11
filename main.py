@@ -12,21 +12,28 @@ app = FastAPI(title="AI Study Chat Assistant")
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-def get_working_model():
-    # Automatically finds an active Gemini Flash model available for your API key
-    try:
-        available = []
-        for m in client.models.list():
-            name = m.name.replace("models/", "")
-            if "gemini" in name and "flash" in name and "lite" not in name and "image" not in name and "audio" not in name:
-                available.append(name)
-        if available:
-            # Prefer newest version (sorted descending)
-            available.sort(reverse=True)
-            return available[0]
-    except Exception:
-        pass
-    return "gemini-2.5-flash"
+# Free-tier supported models in priority order (excludes paid-only 'omni' models)
+FREE_TIER_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash"
+]
+
+def generate_with_fallback(contents, config):
+    last_error = None
+    for model_name in FREE_TIER_MODELS:
+        try:
+            return client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
+        except Exception as e:
+            last_error = e
+            continue
+    raise last_error
 
 class ChatMessage(BaseModel):
     message: str
@@ -70,7 +77,6 @@ def chat_endpoint(req: ChatMessage):
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     try:
-        model_name = get_working_model()
         system_instruction = (
             "You are a helpful, clear AI Study Assistant. Explain concepts simply, "
             "use bullet points when helpful, and keep answers concise and accurate."
@@ -80,8 +86,7 @@ def chat_endpoint(req: ChatMessage):
         if req.context.strip():
             full_prompt = f"Study Notes Context:\n{req.context[:6000]}\n\nStudent Question: {req.message}"
 
-        response = client.models.generate_content(
-            model=model_name,
+        response = generate_with_fallback(
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
@@ -99,11 +104,9 @@ def quiz_endpoint(req: ChatMessage):
         raise HTTPException(status_code=400, detail="Please chat about a topic or upload notes first.")
 
     try:
-        model_name = get_working_model()
         prompt = f"Generate 3 multiple-choice questions based on this topic/notes. Provide 4 options each and the exact matching correct_answer.\n\nContent:\n{topic_text[:6000]}"
 
-        response = client.models.generate_content(
-            model=model_name,
+        response = generate_with_fallback(
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
