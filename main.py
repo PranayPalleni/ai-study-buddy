@@ -1,7 +1,7 @@
 import os
 import io
 import json
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -12,13 +12,11 @@ app = FastAPI(title="AI Study Chat Assistant")
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Free-tier supported models in priority order (excludes paid-only 'omni' models)
 FREE_TIER_MODELS = [
-    "gemini-3.8-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash"
+    "gemini-3.8-flash",
+    "gemini-2.5-flash-lite"
 ]
 
 def generate_with_fallback(contents, config):
@@ -53,21 +51,40 @@ def serve_chat_ui():
         return f.read()
 
 @app.post("/api/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(
+    file: UploadFile = File(...),
+    start_page: int = Form(1),
+    end_page: int = Form(15)
+):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Please upload a valid PDF file.")
     try:
         contents = await file.read()
         reader = PdfReader(io.BytesIO(contents))
-        pages_to_read = reader.pages[:15]
-        extracted_text = "\n".join([page.extract_text() or "" for page in pages_to_read])
+        total_pages = len(reader.pages)
+
+        start_idx = max(0, start_page - 1)
+        end_idx = min(total_pages, end_page)
+
+        if start_idx >= total_pages:
+            raise HTTPException(status_code=400, detail="You have reached the end of this PDF!")
+
+        selected_pages = reader.pages[start_idx:end_idx]
+        extracted_text = "\n".join([page.extract_text() or "" for page in selected_pages])
+
         if not extracted_text.strip():
-            raise HTTPException(status_code=400, detail="No readable text found in this PDF.")
+            raise HTTPException(status_code=400, detail="No readable text found in these pages.")
+
         return {
             "filename": file.filename,
-            "pages": len(reader.pages),
-            "text": extracted_text[:6000]
+            "total_pages": total_pages,
+            "loaded_from": start_idx + 1,
+            "loaded_to": end_idx,
+            "has_more": end_idx < total_pages,
+            "text": extracted_text[:8000]
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF Error: {str(e)}")
 
@@ -78,19 +95,18 @@ def chat_endpoint(req: ChatMessage):
 
     try:
         system_instruction = (
-            "You are a helpful, clear AI Study Assistant. Explain concepts simply, "
-            "use bullet points when helpful, and keep answers concise and accurate."
+            "You are a helpful AI Study Assistant. Explain concepts clearly using structured bullet points."
         )
 
         full_prompt = req.message
         if req.context.strip():
-            full_prompt = f"Study Notes Context:\n{req.context[:6000]}\n\nStudent Question: {req.message}"
+            full_prompt = f"Study Notes:\n{req.context[:8000]}\n\nStudent Request: {req.message}"
 
         response = generate_with_fallback(
             contents=full_prompt,
             config=types.GenerateContentConfig(
                 system_instruction=system_instruction,
-                temperature=0.4,
+                temperature=0.3,
             ),
         )
         return {"reply": response.text}
@@ -104,7 +120,7 @@ def quiz_endpoint(req: ChatMessage):
         raise HTTPException(status_code=400, detail="Please chat about a topic or upload notes first.")
 
     try:
-        prompt = f"Generate 3 multiple-choice questions based on this topic/notes. Provide 4 options each and the exact matching correct_answer.\n\nContent:\n{topic_text[:6000]}"
+        prompt = f"Create 3 multiple-choice questions from these notes. Provide 4 options each and the exact matching correct_answer.\n\nNotes:\n{topic_text[:8000]}"
 
         response = generate_with_fallback(
             contents=prompt,
