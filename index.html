@@ -118,8 +118,8 @@
 
     function handleNewPDF() {
       const fileInput = document.getElementById("pdf-upload");
-      if (!fileInput.files || !fileInput.files) return;
-      currentPdfFile = fileInput.files;
+      if (!fileInput.files || fileInput.files.length === 0) return;
+      currentPdfFile = fileInput.files[0];
       currentEndPage = 0;
       fileInput.value = "";
       loadNextPages();
@@ -146,7 +146,7 @@
         }, 30000);
         const data = await res.json();
         if (!res.ok) {
-          loadingDiv.textContent = data.detail || "Failed to read PDF.";
+          loadingDiv.textContent = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
           return;
         }
 
@@ -185,7 +185,7 @@
         }, 25000);
         const data = await res.json();
         if (!res.ok) {
-          loadingDiv.textContent = data.detail || "Server error.";
+          loadingDiv.textContent = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
           return;
         }
         loadingDiv.textContent = data.reply;
@@ -211,7 +211,7 @@
         }, 25000);
         const data = await res.json();
         if (!res.ok) {
-          loadingDiv.textContent = data.detail || "Quiz error.";
+          loadingDiv.textContent = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
           return;
         }
         loadingDiv.remove();
